@@ -16,6 +16,10 @@ interface TelemetryData {
   flowState: string;
 }
 
+/* ===================== CONSTANTS ===================== */
+
+const FLOW_MAX = 30; // Y-axis max (L/min)
+
 /* ===================== PAGE ===================== */
 
 export default function FlowMonitor() {
@@ -23,12 +27,14 @@ export default function FlowMonitor() {
   const [history, setHistory] = useState<TelemetryData[]>([]);
   const [sessionData, setSessionData] = useState<TelemetryData[]>([]);
   const [status, setStatus] = useState("");
+  const [chartMode, setChartMode] = useState<"bar" | "spline">("bar");
 
   /* ---------- polling ---------- */
   useEffect(() => {
     const id = setInterval(async () => {
       const res = await fetch("/api/telemetry");
       const json = await res.json();
+
       if (json?.timestamp) {
         setData(json);
         setHistory((p) => [...p.slice(-59), json]);
@@ -42,6 +48,7 @@ export default function FlowMonitor() {
   /* ---------- commands ---------- */
   const sendCommand = async (command: string) => {
     setStatus(`Sending ${command}…`);
+
     try {
       const res = await fetch("/api/telemetry/command", {
         method: "POST",
@@ -105,7 +112,7 @@ export default function FlowMonitor() {
             <h1 className="text-2xl md:text-4xl font-bold text-white">
               Flow Monitor
             </h1>
-            <p className="text-slate-400 text-sm md:text-base">
+            <p className="text-slate-400">
               ESP32 • Real-time telemetry
             </p>
           </div>
@@ -133,17 +140,16 @@ export default function FlowMonitor() {
             label="Flow Rate"
             value={data.flowRate}
             unit="L/min"
-            max={25}
+            max={FLOW_MAX}
             thresholds={[
-              { value: 4, color: "bg-green-500" },
-              { value: 10, color: "bg-yellow-500" },
-              { value: 25, color: "bg-red-500" },
+              { value: 15, color: "bg-green-500" },
+              { value: 25, color: "bg-yellow-500" },
+              { value: 30, color: "bg-red-500" },
             ]}
           />
 
-          <Stat label="Session Volume" value={data.sessionVolume} unit="L" />
-
-          <Stat label="Total Volume" value={data.totalVolume} unit="L" />
+          <Stat label="Session Volume" value={data.sessionVolume.toFixed(2)} unit="L" />
+          <Stat label="Total Volume" value={data.totalVolume.toFixed(2)} unit="L" />
 
           <Gauge
             label="Battery"
@@ -176,7 +182,7 @@ export default function FlowMonitor() {
           <Stat label="Pulses" value={data.pulses} unit="/sec" />
 
           <Stat
-            label="Uptime"
+            label="Device Time"
             value={`${Math.floor(data.timestamp / 3600)}h`}
             unit={`${Math.floor((data.timestamp % 3600) / 60)}m`}
           />
@@ -184,21 +190,57 @@ export default function FlowMonitor() {
 
         {/* ---------- FLOW HISTORY ---------- */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-          <div className="flex justify-between mb-3">
+          <div className="flex justify-between items-center mb-3">
             <h2 className="text-white font-semibold">Flow (60s)</h2>
-            <span className="text-xs text-slate-400">0–25 L/min</span>
+
+            <button
+              onClick={() =>
+                setChartMode(chartMode === "bar" ? "spline" : "bar")
+              }
+              className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-300"
+            >
+              {chartMode === "bar" ? "Spline view" : "Bar view"}
+            </button>
           </div>
 
-          <div className="h-40 md:h-52 flex items-end gap-1">
-            {history.map((r, i) => (
-              <div
-                key={i}
-                className="flex-1 rounded-t bg-green-500"
-                style={{
-                  height: `${Math.min((r.flowRate / 25) * 100, 100)}%`,
-                }}
+          {chartMode === "spline" ? (
+            <svg viewBox="0 0 100 100" className="w-full h-40 md:h-52">
+              <polyline
+                fill="none"
+                stroke="#22c55e"
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                points={history
+                  .map((r, i) => {
+                    const x = (i / (history.length - 1)) * 100;
+                    const y =
+                      100 - Math.min((r.flowRate / FLOW_MAX) * 100, 100);
+                    return `${x},${y}`;
+                  })
+                  .join(" ")}
               />
-            ))}
+            </svg>
+          ) : (
+            <div className="h-40 md:h-52 flex items-end gap-1">
+              {history.map((r, i) => (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t bg-green-500"
+                  style={{
+                    height: `${Math.min(
+                      (r.flowRate / FLOW_MAX) * 100,
+                      100
+                    )}%`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-between text-xs text-slate-500 mt-2">
+            <span>0</span>
+            <span>{FLOW_MAX} L/min</span>
           </div>
         </div>
 
@@ -244,7 +286,7 @@ function Button({
   );
 }
 
-/* ---------- Grafana-style BAR GAUGE ---------- */
+/* ---------- BAR GAUGE ---------- */
 function Gauge({
   label,
   value,
@@ -261,7 +303,6 @@ function Gauge({
   invert?: boolean;
 }) {
   const percent = Math.min((value / max) * 100, 100);
-
   const color =
     thresholds.find((t) => value <= t.value)?.color ??
     thresholds[thresholds.length - 1].color;
@@ -277,9 +318,7 @@ function Gauge({
       <div className="w-full h-3 bg-slate-700 rounded overflow-hidden">
         <div
           className={`h-full transition-all ${color}`}
-          style={{
-            width: `${invert ? 100 - percent : percent}%`,
-          }}
+          style={{ width: `${invert ? 100 - percent : percent}%` }}
         />
       </div>
 
