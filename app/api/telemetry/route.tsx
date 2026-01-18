@@ -12,16 +12,31 @@ interface TelemetryData {
   flowState: string;
 }
 
+const DEVICE_API_KEY = process.env.DEVICE_API_KEY!;
 let latestData: TelemetryData | null = null;
-let command: string = "";
 
 export async function POST(request: NextRequest) {
-  latestData = await request.json();
-  console.log('Received telemetry data:', latestData);
-  return NextResponse.json({ success: true });
+  const apiKey = request.headers.get('x-api-key');
+
+  if (apiKey !== DEVICE_API_KEY) {
+    return NextResponse.json(
+      { error: 'Unauthorized device' },
+      { status: 401 }
+    );
+  }
+
+  try {
+    latestData = await request.json();
+    console.log('Received telemetry:', latestData);
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid payload' },
+      { status: 400 }
+    );
+  }
 }
 
 export async function GET() {
-  console.log('Sending telemetry data:', latestData);
   return NextResponse.json(latestData || {});
 }
